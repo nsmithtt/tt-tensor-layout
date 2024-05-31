@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<div id="container">
+<table>
+<tr>
+<td>
+<table>
+<th> Input Values </th>
+<tr>
+  <td>Tensor Shape</td>
+  <td><input id="shape" value="4,7,2,6,433"></td>
+</tr>
+<tr>
+  <td  id="shard_table" style="outline: none">Shard Shape</td>
+  <td><input id="shard" value="120,109"></td>
+  <td>or Grid Shape</td>
+  <td><input id="grid" value="17,2"></td>
+</tr>
+<tr>
+  <td>Tile Shape</td>
+  <td><input id="tile" value="32,32"></td>
+</tr>
+</table>
+</td>
+<td>
+<table>
+<th> Derived Values </th>
+<tr>
+  <td>Physical Tensor Shape</td>
+  <td><input disabled id="physhape" value="32,32"></td>
+</tr>
+<tr>
+  <td id="physhard_table" style="outline: none">Physical Shard Shape</td>
+  <td><input disabled id="physhard" value="32,32"></td>
+</tr>
+<tr>
+  <td>Strides</td>
+  <td><input disabled id="strides" value="32,32" style="width: 400px;"></td>
+</tr>
+</table>
+<table>
+</table>
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+  <td>Dim</td>
+  <td><input type="range" min="0" max="0" value="0" id="dimvis"></td>
+  <td><input disabled id="dimvisval" value="0"></td>
+</tr>
+<tr>
+  <td>Scale</td>
+  <td><input type="range" min="1" max="100" value="1" id="scale"></td>
+</tr>
+</table>
+</div>
+
+<script type="module">
+
+import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+
+// Declare the chart dimensions and margins.
+const width = 640;
+const height = 400;
+const marginTop = 20;
+const marginRight = 20;
+const marginBottom = 30;
+const marginLeft = 40;
+const spacing = 5;
+
+// Declare the y (vertical position) scale.
+const y = d3.scaleLinear()
+    .domain([0, 100])
+    .range([height - marginBottom, marginTop]);
+
+// Create the SVG container.
+const svg = d3.create("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+// Add the y-axis.
+svg.append("g")
+    .attr("transform", `translate(${marginLeft},0)`)
+    .call(d3.axisLeft(y));
+
+// Append the SVG element.
+container.append(svg.node());
+
+const parse = s => JSON.parse(`[${s.value}]`);
+
+const divup = (a, b) => Math.floor((a + b - 1) / b);
+const roundup = (a, b) => divup(a, b) * b;
+
+const calculate_strides = (shape, align) => {
+  const strides = [1];
+  for (let dim = -1; dim > -shape.length - 1; --dim) {
+    let stride = shape[shape.length + dim] * strides[0];
+    if (align.has(dim)) {
+      stride = roundup(stride, align.get(dim));
+    }
+    strides.unshift(stride);
+  }
+  return strides;
+}
+
+const calculate_default_align = (shape, align2d) => {
+  const align = new Map();
+  align.set(-shape.length, align2d[0]);
+  align.set(-1, align2d[1]);
+  return align;
+}
+
+const get_physical_shape = (strides, tile_shape) => {
+  const collapsed = Math.floor(strides[0] / strides[strides.length - 2]);
+  return [roundup(collapsed, tile_shape[0]), roundup(strides[strides.length - 2], tile_shape[1])];
+}
+
+const get_physical_shard_shape = (shard, tile) => {
+  return [roundup(shard[0], tile[0]), roundup(shard[1], tile[1])];
+}
+
+const get_grid_shape = (strides, shard, tile) => {
+  const c = strides[strides.length - 2];
+  const r = Math.floor(strides[0] / c);
+  return [Math.ceil(r / shard[0]), Math.ceil(c / shard[1])];
+}
+
+const draw = solve_for_grid => () => {
+  svg.selectAll("g").remove();
+  const shape = parse(document.querySelector("#shape"));
+  const tile = parse(document.querySelector("#tile"));
+  let shard = solve_for_grid ? parse(document.querySelector("#shard")) : [];
+  let grid = solve_for_grid ? [] : parse(document.querySelector("#grid"));
+  const align = calculate_default_align(shape, solve_for_grid ? shard : grid);
+  const strides = calculate_strides(shape, align);
+  const physical_shape = get_physical_shape(strides, tile);
+
+  if (solve_for_grid) {
+    grid = get_grid_shape(strides, shard, tile);
+    document.querySelector("#grid").value = grid.join(",");
+  } else {
+    let inner = strides[strides.length - 2];
+    let outer = strides[0] / inner;
+    shard = [Math.floor(outer / grid[0]), Math.floor(inner / grid[1])];
+    document.querySelector("#shard").value = shard.join(",");
+  }
+
+  const physical_shard_shape = get_physical_shard_shape(shard, tile);
+
+  document.querySelector("#dimvis").max = shape.length - 1;
+  document.querySelector("#dimvisval").value = document.querySelector("#dimvis").value;
+  document.querySelector("#strides").value = strides.join(",");
+  document.querySelector("#physhape").value = physical_shape.join(",");
+  document.querySelector("#physhard").value = physical_shard_shape.join(",");
+  let shard_table = d3.select("#shard_table");
+  let physhard_table = d3.select("#physhard_table");
+
+  let g = svg.append("g");
+
+  let physical_shards = g.append("g");
+  let logical_shards = g.append("g");
+
+  let translate = d => `translate(${d[1] * (physical_shard_shape[1] + spacing) + marginLeft}, ${d[0] * (physical_shard_shape[0] + spacing) + marginTop})`;
+
+  physical_shards.selectAll("rect")
+    .data(d3.cross(d3.range(grid[0]), d3.range(grid[1])))
+    .join("rect")
+    .attr("y", 0)
+    .attr("x", 0)
+    .attr("height", physical_shard_shape[0])
+    .attr("width", physical_shard_shape[1])
+    .attr("fill", "#ffffff")
+    .attr("stroke", "black")
+    .attr("transform", translate)
+    .on('mouseover', d => physhard_table.style("outline", 'solid'))
+    .on('mouseout', d => physhard_table.style("outline", 'none'));
+
+  logical_shards.selectAll("rect")
+    .data(d3.cross(d3.range(grid[0]), d3.range(grid[1])))
+    .join("rect")
+    .attr("y", 0)
+    .attr("x", 0)
+    .attr("height", shard[0])
+    .attr("width", shard[1])
+    .attr("fill", "#cccccc")
+    .attr("stroke", "black")
+    .attr("transform", translate)
+    .on('mouseover', d => shard_table.style("outline", 'solid'))
+    .on('mouseout', d => shard_table.style("outline", 'none'));
+
+  let lineFunc = d3.line()
+    .x(d => d[0])
+    .y(d => d[1]);
+
+  let right_bound = (physical_shard_shape[1] + spacing) * (grid[1] - 1) + (shape[shape.length - 1] - shard[1] * (grid[1] - 1)) % physical_shard_shape[1];
+  let bottom_bound = (physical_shard_shape[1] + spacing) * (grid[1] - 1) + shape[shape.length - 1] % physical_shard_shape[1];
+  g.append("path")
+    .attr("d", lineFunc([[marginLeft + right_bound, 0], [marginLeft + right_bound, (physical_shard_shape[0] + spacing) * grid[0] + marginBottom]]))
+    .attr('stroke', 'black')
+    .attr('fill', 'none');
+
+  const scale = 1.0 + document.querySelector("#scale").value / 10;
+  g.attr("transform", `scale(${scale})`);
+
+  const bbox = g.node().getBBox();
+  svg.attr("width", (bbox.width + marginLeft + marginRight) * scale);
+  svg.attr("height", (bbox.height + marginTop + marginBottom) * scale);
+}
+draw(true)();
+
+let event_listeners = ["#shape", "#shard", "#grid", "#tile", "#scale", "#dimvis"];
+for (let event of event_listeners) {
+  document.querySelector(event).addEventListener('input', draw(event !== "#grid"));
+}
+
+</script>
