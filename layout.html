@@ -45,15 +45,17 @@
 
 <table>
 <tr>
-  <td>Dim</td>
-  <td><input type="range" min="0" max="0" value="0" id="dimvis"></td>
-  <td><input disabled id="dimvisval" value="0"></td>
+  <td>Stride</td>
+  <td id="stride_slider">
+  </td>
 </tr>
 <tr>
   <td>Scale</td>
   <td><input type="range" min="1" max="100" value="1" id="scale"></td>
 </tr>
 </table>
+
+
 </div>
 
 <script type="module">
@@ -63,12 +65,13 @@ import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
 //
 // Create the SVG container
 //
+let rank = 0;
 const width = 640;
 const height = 400;
 const marginTop = 20;
 const marginRight = 20;
 const marginBottom = 30;
-const marginLeft = 40;
+const absoluteMarginLeft = 40;
 const spacing = 5;
 const svg = d3.create("svg")
     .attr("width", width)
@@ -79,6 +82,26 @@ container.append(svg.node());
 // Helper functions
 //
 const parse = s => JSON.parse(`[${s.value}]`);
+
+const get_stride_listeners = (shape, shard) => {
+  if (rank !== shape.length) {
+    rank = shape.length;
+    let stride_slider = document.querySelector("#stride_slider");
+    stride_slider.innerHTML = "";
+    for (let dim = 0; dim < shape.length; ++dim) {
+      let idx = dim === (shape.length - 1) ? 1 : 0;
+      stride_slider.innerHTML += `<input type="range" min="0" max="${shard[idx]}" value="0" id="stride${dim}">`
+    }
+
+    for (let dim = 0; dim < shape.length; ++dim)
+      document.querySelector(`#stride${dim}`).addEventListener('input', draw(true));
+  }
+  let stride_values = [];
+  for (let dim = 0; dim < shape.length; ++dim) {
+    stride_values.push(parseInt(document.querySelector(`#stride${dim}`).value));
+  }
+  return stride_values;
+}
 
 //
 // Layout calculations
@@ -95,24 +118,15 @@ const convert_map_to_negative_dims = (m, shape) => {
   return r;
 }
 
-const calculate_strides = (shape, align) => {
+const calculate_strides = (shape, stride_values) => {
   const strides = [1];
   for (let dim = -1; dim > -shape.length - 1; --dim) {
     let stride = shape[shape.length + dim] * strides[0];
-    if (align.has(dim)) {
-      stride = roundup(stride, align.get(dim));
-    }
+    let multiplier = strides.length > 1 ? strides[strides.length - 2] : 1;
+    stride += stride_values[shape.length + dim] * multiplier;
     strides.unshift(stride);
   }
   return strides;
-}
-
-const calculate_default_align = (align, shape, align2d) => {
-  let r = align.has(-shape.length) ? least_common_multiple(align.get(-shape.length), align2d[0]) : align2d[0];
-  let c = align.has(-1) ? least_common_multiple(align.get(-1), align2d[1]) : align2d[1];
-  align.set(-shape.length, align2d[0]);
-  align.set(-1, align2d[1]);
-  return align;
 }
 
 const get_physical_shape = (strides, tile_shape) => {
@@ -161,12 +175,12 @@ const draw = solve_for_grid => () => {
   let input_align = [{}]; //parse(document.querySelector("#align"));
   input_align = input_align.length === 0 ? new Map() : Object.entries(input_align[0]);
   input_align = convert_map_to_negative_dims(input_align, shape);
+  let stride_values = get_stride_listeners(shape, shard);
 
   //
   // Calculate derived
   //
-  const align = calculate_default_align(input_align, shape, solve_for_grid ? shard : grid);
-  const strides = calculate_strides(shape, align);
+  const strides = calculate_strides(shape, stride_values);
   const physical_shape = get_physical_shape(strides, tile);
   if (solve_for_grid) {
     grid = get_grid_shape(strides, shard, tile);
@@ -182,19 +196,17 @@ const draw = solve_for_grid => () => {
   //
   // Visualize
   //
-  document.querySelector("#dimvis").max = shape.length - 2;
-  document.querySelector("#dimvisval").value = document.querySelector("#dimvis").value;
   document.querySelector("#strides").value = strides.join(",");
   document.querySelector("#physhape").value = physical_shape.join(",");
   document.querySelector("#physhard").value = physical_shard_shape.join(",");
   let shard_table = d3.select("#shard_table");
   let physhard_table = d3.select("#physhard_table");
+  const marginLeft = absoluteMarginLeft + (shape.length - 2) * 10;
 
   let g = svg.append("g");
 
   let physical_shards = g.append("g");
   let logical_shards = g.append("g");
-  let dim_range = g.append("g");
 
   let translate = d => `translate(${d[1] * (physical_shard_shape[1] + spacing) + marginLeft}, ${d[0] * (physical_shard_shape[0] + spacing) + marginTop})`;
 
@@ -224,28 +236,43 @@ const draw = solve_for_grid => () => {
     .on('mouseover', d => shard_table.style("outline", 'solid'))
     .on('mouseout', d => shard_table.style("outline", 'none'));
 
-  const dim = parseInt(document.querySelector("#dimvis").value);
-  const logical_stride = shape[dim + 1] * (strides[dim + 2] / strides[strides.length - 2]);
-  const physical_stride = strides[dim + 1] / strides[strides.length - 2];
+  const remap_x_to_view = coord => {
+    let core_c = Math.floor(coord / shard[1]);
+    return core_c * (physical_shard_shape[1] + spacing) + (coord % shard[1]);
+  };
   const remap_y_to_view = coord => {
     let core_r = Math.floor(coord / shard[0]);
     return core_r * (physical_shard_shape[0] + spacing) + (coord % shard[0]);
   };
-  let ranges = [];
-  for (let i = 0; i < shape[dim]; ++i) {
-    let start = i * physical_stride;
-    let end = (i + 1) * logical_stride - 1;
-    ranges.push([remap_y_to_view(start), remap_y_to_view(end)]);
-  }
-  dim_range.selectAll("path")
-    .data(ranges)
-    .join("path")
-    .attr("d", vrange)
-    .attr('stroke', 'black')
-    .attr('fill', 'none')
-    .attr("transform", `translate(${marginLeft}, ${marginTop})`);
+  for (let dim = 0; dim < shape.length - 1; ++dim) {
+    const dimMarginLeft = absoluteMarginLeft + dim * 10;
 
-  let right_bound = (physical_shard_shape[1] + spacing) * (grid[1] - 1) + (shape[shape.length - 1] - shard[1] * (grid[1] - 1)) % physical_shard_shape[1];
+    let dim_range = g.append("g");
+    const logical_stride = shape[dim] * (strides[dim + 1] / strides[strides.length - 2]);
+    const physical_stride = strides[dim] / strides[strides.length - 2];
+    let ranges = [];
+    let shape_dim = (dim > 0) ? shape[dim - 1] : 1;
+    for (let i = 0; i < shape_dim; ++i) {
+      let start = i * physical_stride;
+      let end = start + logical_stride - 1;
+      ranges.push([remap_y_to_view(start), remap_y_to_view(end)]);
+    }
+    dim_range.selectAll("path")
+      .data(ranges)
+      .join("path")
+      .attr("d", vrange)
+      .attr('stroke', 'black')
+      .attr('fill', 'none')
+      .attr("transform", `translate(${dimMarginLeft}, ${marginTop})`);
+    dim_range.append("text")
+      .text(`${dim}`)
+      .attr("x", dimMarginLeft - 12)
+      .attr("y", marginTop - 2)
+      .style("font-size", "12px");
+  }
+
+  let inner_stride = stride_values[stride_values.length - 1];
+  let right_bound = remap_x_to_view(shape[shape.length - 1]);
   g.append("path")
     .attr("d", hrange([0, right_bound]))
     .attr('stroke', 'black')
@@ -261,7 +288,7 @@ const draw = solve_for_grid => () => {
 }
 draw(true)();
 
-let event_listeners = ["#shape", "#shard", "#grid", "#tile", "#scale", "#dimvis"];
+let event_listeners = ["#shape", "#shard", "#grid", "#tile", "#scale"];
 for (let event of event_listeners) {
   document.querySelector(event).addEventListener('input', draw(event !== "#grid"));
 }
