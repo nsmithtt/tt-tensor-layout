@@ -1,6 +1,6 @@
 # Tensor Layout Spec
 
-This proposal outlines an effort to support more flexible tensor layouts in TTNN.  The initial impulse to refactor tensor layout spawned from convolutions which need additional shape tracking, but this is cumbersome and error prone to manually propagate through a model.  The existing TTNN layout is also somewhat ambiguous in some situations, different ops use concepts like sharding and padding in different ways that aren't always compatible or consistent with each other.
+This proposal outlines an effort to support more flexible tensor layouts in TTNN.  The initial impulse to refactor tensor layout spawned from convolutions which need additional shape tracking, this is currently a manual process and is cumbersome to deal with and error prone when authoring a model.  The existing TTNN layout is also somewhat ambiguous in some situations, different ops use concepts like sharding and padding in different ways that aren't always compatible or consistent with each other.
 
 ### Some high level goals
 - Logical shapes: Keep the original tensor shape and rank intact and agnostic to underlying storage layout
