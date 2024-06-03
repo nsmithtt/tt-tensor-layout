@@ -118,12 +118,24 @@ const convert_map_to_negative_dims = (m, shape) => {
   return r;
 }
 
-const calculate_strides = (shape, stride_values) => {
+const calculate_default_align = (shape, align2d) => {
+  let align = new Map();
+  let r = align.has(-shape.length) ? least_common_multiple(align.get(-shape.length), align2d[0]) : align2d[0];
+  let c = align.has(-1) ? least_common_multiple(align.get(-1), align2d[1]) : align2d[1];
+  align.set(-shape.length, align2d[0]);
+  align.set(-1, align2d[1]);
+  return align;
+}
+
+const calculate_strides = (shape, align, stride_values) => {
   const strides = [1];
   for (let dim = -1; dim > -shape.length - 1; --dim) {
     let stride = shape[shape.length + dim] * strides[0];
     let multiplier = strides.length > 1 ? strides[strides.length - 2] : 1;
     stride += stride_values[shape.length + dim] * multiplier;
+    if (align.has(dim)) {
+      stride = roundup(stride, align.get(dim));
+    }
     strides.unshift(stride);
   }
   return strides;
@@ -180,7 +192,8 @@ const draw = solve_for_grid => () => {
   //
   // Calculate derived
   //
-  const strides = calculate_strides(shape, stride_values);
+  const align = calculate_default_align(shape, solve_for_grid ? shard : grid);
+  const strides = calculate_strides(shape, align, stride_values);
   const physical_shape = get_physical_shape(strides, tile);
   if (solve_for_grid) {
     grid = get_grid_shape(strides, shard, tile);
