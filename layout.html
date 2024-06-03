@@ -291,6 +291,11 @@ const draw = solve_for_grid => () => {
     .attr('stroke', 'black')
     .attr('fill', 'none')
     .attr("transform", `translate(${marginLeft}, ${marginTop})`);
+  g.append("text")
+    .text(`${shape.length - 1}`)
+    .attr("x", marginLeft)
+    .attr("y", marginTop - 12)
+    .style("font-size", "12px");
 
   const scale = 1.0 + document.querySelector("#scale").value / 10;
   g.attr("transform", `scale(${scale})`);
