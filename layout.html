@@ -285,7 +285,7 @@ const draw = solve_for_grid => () => {
   }
 
   let inner_stride = stride_values[stride_values.length - 1];
-  let right_bound = remap_x_to_view(shape[shape.length - 1]);
+  let right_bound = remap_x_to_view(shape[shape.length - 1] - 1);
   g.append("path")
     .attr("d", hrange([0, right_bound]))
     .attr('stroke', 'black')
